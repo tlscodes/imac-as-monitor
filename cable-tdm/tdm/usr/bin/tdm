@@ -11,12 +11,15 @@
 # and the applesmc kernel driver must not own those ports.
 
 SMC=/usr/bin/SmcDumpKey
+LOCK=/tmp/tdm.smc.lock
+# every SMC port access (tdm, tdm-guard) is serialised: raw port I/O has no lock
+smc() { if command -v flock >/dev/null 2>&1; then flock "$LOCK" "$SMC" "$@"; else "$SMC" "$@"; fi; }
 trap "" 2
 
 [ "$(id -u)" = 0 ] || exec /usr/bin/sudo "$0" "$@"
 /sbin/rmmod applesmc 2>/dev/null
 
-smc_get() { "$SMC" "$1" 2>/dev/null; }
+smc_get() { smc "$1" 2>/dev/null; }
 
 status() {
     smc_get MVHR | grep -q 'x00' && echo off || echo on
@@ -27,9 +30,9 @@ apply() {
     want=$1; n=0
     while [ $n -lt 4 ]; do
         n=$((n + 1))
-        "$SMC" MVHR "$want" >/dev/null 2>&1
+        smc MVHR "$want" >/dev/null 2>&1
         sleep 1
-        "$SMC" MVMR 2 >/dev/null 2>&1
+        smc MVMR 2 >/dev/null 2>&1
         sleep 2
         if [ "$want" = 1 ]; then s=on; else s=off; fi
         [ "$(status)" = "$s" ] && return 0
@@ -64,7 +67,7 @@ EOF
 }
 
 case "$1" in
-    on)      printf "Target Display Mode: "; rm -f /tmp/tdm.manual_off; apply 1 && echo ON ;;
+    on)      printf "Target Display Mode: "; [ -z "$TDM_GUARD" ] && rm -f /tmp/tdm.manual_off; apply 1 && echo ON ;;
     off)     printf "Target Display Mode: "; [ -z "$TDM_GUARD" ] && touch /tmp/tdm.manual_off; apply 0 && echo OFF ;;
     toggle)  if [ "$(status)" = on ]; then "$0" off; else "$0" on; fi ;;
     status)  status ;;

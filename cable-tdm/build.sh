@@ -39,11 +39,11 @@ else
 fi
 
 log "3/5 tdm.tcz extension"
-chmod 755 tdm/usr/bin/tdm tdm/usr/local/tce.installed/tdm
+chmod 755 tdm/usr/bin/tdm tdm/usr/bin/tdm-guard tdm/usr/bin/tdm-flush tdm/usr/local/tce.installed/tdm
 rm -rf build && mkdir -p build/pkg
 cp -R tdm/. build/pkg/
 cp "$PRE/SmcDumpKey" build/pkg/usr/bin/SmcDumpKey && chmod 755 build/pkg/usr/bin/SmcDumpKey
-mksquashfs build/pkg build/tdm.tcz -noappend -quiet -no-progress -no-xattrs -comp gzip >/dev/null
+mksquashfs build/pkg build/tdm.tcz -noappend -quiet -no-progress -no-xattrs -all-root -comp gzip >/dev/null
 echo "ok  tdm.tcz $(stat -f %z build/tdm.tcz) bytes"
 
 log "4/5 assemble $DIST/"

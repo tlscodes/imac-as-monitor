@@ -1,0 +1,15 @@
+#!/bin/sh
+# tdm-flush: copy the RAM logs (/tmp/tdm-log/*) onto the USB key, twice:
+#   <key>/tce/log/<name>   and   <key>/tdm-<name>   (root of the key, so the
+# logs are found even if tce/log/ is unreadable), then sync. Safe to call often.
+RAM=/tmp/tdm-log
+KEY=$(cat /etc/sysconfig/tdm-keydir 2>/dev/null)
+[ -n "$KEY" ] && [ -d "$KEY" ] || exit 0
+mkdir -p "$KEY/tce/log" 2>/dev/null
+for f in "$RAM"/*.log; do
+    [ -f "$f" ] || continue
+    n=${f##*/}
+    cp -f "$f" "$KEY/tce/log/$n" 2>/dev/null
+    cp -f "$f" "$KEY/tdm-$n" 2>/dev/null
+done
+sync

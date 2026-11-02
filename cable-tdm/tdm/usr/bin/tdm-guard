@@ -1,97 +1,82 @@
 #!/bin/sh
-# tdm-guard: keeps Target Display Mode up on its own. Started once at boot by
-# /usr/local/tce.installed/tdm (background), sleeps between polls, no busy loop.
+# tdm-guard: keeps Target Display Mode up on its own, no keyboard needed.
+# Started once at boot by /usr/local/tce.installed/tdm AFTER the proven
+# synchronous `tdm on`; it never switches at start, it only watches and repairs.
 #
-#   BOOT -> WAITING_FOR_CONNECTION -> TDM_ACTIVATING (one `tdm on`) -> TDM_ACTIVE
-#   TDM_ACTIVE: every POLL s read MVHR; 0 = SMC routed the panel back to the
-#   internal GPU -> LINK_RETRY: the proven recovery (F4 then F3 = off, on), at
-#   most one try per RETRY_MIN s and MAX_FAILS tries, then SAFE_CONSOLE.
-#   Manual `tdm off` (Ctrl+Alt+F4) sets /tmp/tdm.manual_off; the guard never
-#   fights it until `tdm on` (Ctrl+Alt+F3) clears it.
+#   TDM_ACTIVE   every POLL s read MVHR. 1 = panel on the external input.
+#   LINK_RETRY   MVHR=0 while nobody asked for off -> the proven recovery
+#                (off, on), at most one try per RETRY_MIN s, MAX_FAILS tries.
+#   SAFE_CONSOLE after MAX_FAILS, or after a manual `tdm off` (Ctrl+Alt+F4):
+#                the guard stops touching the SMC until a manual `tdm on`
+#                (Ctrl+Alt+F3) clears /tmp/tdm.manual_off.
 #
-# LIMITATIONS (honest, hardware-unverified):
-#   * MVHR is an SMC routing state, not a DisplayPort link monitor. A black
-#     picture with MVHR still 1 is NOT detected; recovery stays manual (F4, F3).
-#   * MVMS meaning is unknown on this iMac. The guard only LOGS its raw value.
-#     Cable gate: if the key holds tdm-guard.conf with MVMS_NOCABLE="<raw>"
-#     (measured with `tdm-guard measure` while the cable is unplugged), the
-#     guard waits while MVMS equals that value instead of blanking the panel.
-#     Without that record it behaves like the old boot hook: `tdm on` at boot.
+#   `tdm-guard measure`  prints the raw SMC keys MVHR MVMR MVMS (used by logs).
+#   Pause: touch /tmp/tdm-guard.pause      Log: <key>/tce/log/guard.log
 #
-# Config: <tce dir>/tdm-guard.conf (FAT key, editable from any OS)
-# Log: /tmp/tdm-guard.log   Pause: touch /tmp/tdm-guard.pause
-LOG=/tmp/tdm-guard.log
-PID=/tmp/tdm-guard.pid
+# LIMITATIONS (hardware-honest):
+#   MVHR is an SMC routing state, not a DisplayPort link monitor: a black
+#   picture with MVHR still 1 is not detected. MVMS meaning is unknown; its raw
+#   value is only logged (heartbeat every HEARTBEAT polls and on every change)
+#   so the real behaviour can be read off the key afterwards.
 SMC=/usr/bin/SmcDumpKey
-CONF=/etc/sysconfig/tcedir/tdm-guard.conf
+LOCK=/tmp/tdm.smc.lock
+smc() { if command -v flock >/dev/null 2>&1; then flock "$LOCK" "$SMC" "$@"; else "$SMC" "$@"; fi; }
+LOGDIR=/tmp/tdm-log; mkdir -p "$LOGDIR"   # RAM; tdm-flush mirrors it to the key
+LOG="$LOGDIR/guard.log"
+PID=/tmp/tdm-guard.pid
 POLL=${TDM_GUARD_POLL:-15}
 RETRY_MIN=${TDM_GUARD_RETRY:-60}
 MAX_FAILS=${TDM_GUARD_MAX:-5}
-MVMS_NOCABLE=""
+HEARTBEAT=${TDM_GUARD_HEARTBEAT:-12}   # 12 x 15 s = every 3 min
 
-log() { echo "$(date '+%F %T') [$state] $*" >> "$LOG"; }
-raw() { "$SMC" "$1" 2>/dev/null | tr -s ' \n' ' ' | sed 's/^ //;s/ $//'; }
+raw() { smc "$1" 2>/dev/null | tr -s ' \n' ' ' | sed 's/^ //;s/ $//'; }
+measure() { echo "MVHR=[$(raw MVHR)] MVMR=[$(raw MVMR)] MVMS=[$(raw MVMS)]"; }
+[ "$1" = measure ] && { measure; exit 0; }
+
+state=START
+log() { echo "$(date '+%F %T') up=$(cut -d. -f1 /proc/uptime)s [$state] $*" >> "$LOG"; echo "tdm-guard[$state]: $*" > /dev/kmsg 2>/dev/null; /usr/bin/tdm-flush; }
 up()  { cut -d. -f1 /proc/uptime; }
 
-if [ "$1" = measure ]; then
-    echo "MVHR=[$(raw MVHR)] MVMR=[$(raw MVMR)] MVMS=[$(raw MVMS)]"; exit 0
-fi
-
-state=BOOT
 if [ -s "$PID" ] && kill -0 "$(cat "$PID")" 2>/dev/null; then
     log "already running as pid $(cat "$PID"), exit"; exit 0
 fi
 echo $$ > "$PID"
 [ -x "$SMC" ] || { log "ERROR $SMC missing"; exit 1; }
-[ -r "$CONF" ] && . "$CONF"
+ln -sf "$LOG" /tmp/tdm-guard.log 2>/dev/null
 
-# No console blanking, ever (kernel also boots with consoleblank=0).
-echo 0 > /sys/module/kernel/parameters/consoleblank 2>/dev/null
-setterm -blank 0 -powerdown 0 -powersave off < /dev/tty1 > /dev/tty1 2>/dev/null
-log "start pid=$$ poll=${POLL}s retry=${RETRY_MIN}s max=$MAX_FAILS nocable=[${MVMS_NOCABLE}]"
-log "raw MVHR=[$(raw MVHR)] MVMR=[$(raw MVMR)] MVMS=[$(raw MVMS)]"
+log "start pid=$$ poll=${POLL}s retry=${RETRY_MIN}s max=$MAX_FAILS log=$LOG"
+log "smc: $(measure)"
 
-state=WAITING_FOR_CONNECTION
-last_mvms=$(raw MVMS)
-if [ -n "$MVMS_NOCABLE" ]; then
-    while [ "$(raw MVMS)" = "$MVMS_NOCABLE" ]; do
-        [ "$waited" ] || { log "MVMS=[$MVMS_NOCABLE] = no cable, waiting"; waited=1; }
-        sleep "$POLL"
-    done
-    log "MVMS=[$(raw MVMS)] differs from no-cable value, activating"
-else
-    log "no MVMS_NOCABLE recorded -> activate at boot (old behaviour)"
-fi
-
-state=TDM_ACTIVATING
-rm -f /tmp/tdm.manual_off
-TDM_GUARD=1 /usr/bin/tdm on >> "$LOG" 2>&1
 state=TDM_ACTIVE
-fails=0; last_try=0
+fails=0; last_try=0; n=0; last_mvms=$(raw MVMS)
 
 while :; do
     sleep "$POLL"
-    m=$(raw MVMS)
-    if [ "$m" != "$last_mvms" ]; then
-        log "MVMS changed: [$last_mvms] -> [$m]"; last_mvms=$m
+    n=$((n + 1))
+    mvms=$(raw MVMS)
+    if [ "$mvms" != "$last_mvms" ]; then
+        log "MVMS changed [$last_mvms] -> [$mvms] (status=$(/usr/bin/tdm status))"; last_mvms=$mvms
     fi
+    [ $((n % HEARTBEAT)) -eq 0 ] && log "heartbeat fails=$fails $(measure)"
     [ -e /tmp/tdm-guard.pause ] && continue
     if [ -e /tmp/tdm.manual_off ]; then
-        [ "$state" != SAFE_CONSOLE ] && { state=SAFE_CONSOLE; log "manual off, waiting for Ctrl+Alt+F3"; }
+        [ "$state" != SAFE_CONSOLE ] && { state=SAFE_CONSOLE; log "manual off, hands off until Ctrl+Alt+F3"; }
         continue
     fi
     if [ "$(/usr/bin/tdm status)" = off ]; then
-        now=$(up)
         if [ "$fails" -ge "$MAX_FAILS" ]; then
-            [ "$state" != SAFE_CONSOLE ] && { state=SAFE_CONSOLE; log "gave up after $fails tries; Ctrl+Alt+F3 re-arms"; }
+            [ "$state" != SAFE_CONSOLE ] && { state=SAFE_CONSOLE; log "gave up after $fails tries, console stays; Ctrl+Alt+F3 retries"; }
             continue
         fi
+        now=$(up)
         [ $((now - last_try)) -lt "$RETRY_MIN" ] && continue
         state=LINK_RETRY; fails=$((fails + 1)); last_try=$now
-        log "MVHR=0 while expected on -> recovery #$fails (off, on)"
+        log "MVHR=0 while expected on -> recovery #$fails (off, on) $(measure)"
         TDM_GUARD=1 /usr/bin/tdm off >> "$LOG" 2>&1
-        sleep 2
+        sleep 3   # proven manual timing: off, 3 s, on, 10 s
         TDM_GUARD=1 /usr/bin/tdm on  >> "$LOG" 2>&1
+        sleep 10
+        log "recovery #$fails result status=$(/usr/bin/tdm status) $(measure)"
         state=TDM_ACTIVE
     else
         if [ "$fails" -ne 0 ] || [ "$state" != TDM_ACTIVE ]; then
