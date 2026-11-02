@@ -1,0 +1,77 @@
+#!/bin/sh
+# tdm - Target Display Mode control for vintage iMacs (2009-2014) on TinyCore.
+#
+# usage: tdm on|off|toggle|status|bright <0-100>|poweroff|help
+#
+# Mechanism (reverse-engineered by Florian Echtler, smc_util):
+#   SMC key MVHR = 1 -> route the panel to the external Mini DisplayPort input
+#   SMC key MVHR = 0 -> route the panel back to the internal GPU
+#   SMC key MVMR = 2 -> apply the change
+# SmcDumpKey talks to the SMC over I/O ports 0x300-0x31f, so it needs root
+# and the applesmc kernel driver must not own those ports.
+
+SMC=/usr/bin/SmcDumpKey
+trap "" 2
+
+[ "$(id -u)" = 0 ] || exec /usr/bin/sudo "$0" "$@"
+/sbin/rmmod applesmc 2>/dev/null
+
+smc_get() { "$SMC" "$1" 2>/dev/null; }
+
+status() {
+    smc_get MVHR | grep -q 'x00' && echo off || echo on
+}
+
+apply() {
+    # $1 = 1 (on) / 0 (off); retries because the SMC occasionally NAKs (0x40)
+    want=$1; n=0
+    while [ $n -lt 4 ]; do
+        n=$((n + 1))
+        "$SMC" MVHR "$want" >/dev/null 2>&1
+        sleep 1
+        "$SMC" MVMR 2 >/dev/null 2>&1
+        sleep 2
+        if [ "$want" = 1 ]; then s=on; else s=off; fi
+        [ "$(status)" = "$s" ] && return 0
+    done
+    echo "tdm: SMC did not accept the change after $n tries" >&2
+    return 1
+}
+
+bright() {
+    for d in /sys/class/backlight/*; do
+        [ -e "$d/max_brightness" ] || continue
+        max=$(cat "$d/max_brightness")
+        echo $(( $1 * max / 100 )) > "$d/brightness" && echo "backlight $(basename "$d"): $1%"
+    done
+}
+
+help() {
+cat <<'EOF'
+
+  iMac Target Display Mode (TinyCore)
+  -----------------------------------
+  Hotkeys (Ctrl+Alt+F<n>, then Enter)      CLI
+    F1  local Linux console
+    F2  toggle display mode                tdm toggle
+    F3  external input ON  (monitor mode)  tdm on
+    F4  external input OFF (local console) tdm off
+    F5  power off the iMac                 tdm poweroff
+    F6  cycle backlight 100 > 70 > 40      tdm bright <0-100>
+                                           tdm status
+
+EOF
+}
+
+case "$1" in
+    on)      printf "Target Display Mode: "; rm -f /tmp/tdm.manual_off; apply 1 && echo ON ;;
+    off)     printf "Target Display Mode: "; [ -z "$TDM_GUARD" ] && touch /tmp/tdm.manual_off; apply 0 && echo OFF ;;
+    toggle)  if [ "$(status)" = on ]; then "$0" off; else "$0" on; fi ;;
+    status)  status ;;
+    bright)  bright "${2:-100}" ;;
+    cycle)   f=/tmp/tdm_bright; cur=$(cat $f 2>/dev/null || echo 100)
+             case $cur in 100) nxt=70;; 70) nxt=40;; *) nxt=100;; esac
+             echo $nxt > $f; bright $nxt ;;
+    poweroff) echo "Powering off ..."; /sbin/poweroff ;;
+    *)       help ;;
+esac

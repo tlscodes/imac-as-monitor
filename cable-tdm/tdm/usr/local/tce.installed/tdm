@@ -1,0 +1,28 @@
+#!/bin/sh
+# Runs once at boot (as root) when tdm.tcz is loaded from onboot.lst.
+trap "" 2
+
+# 1. Hotkeys: Ctrl+Alt+F2..F6 run tdm commands instead of login shells.
+sed -i \
+  -e 's|^.*tty2::.*|tty2::askfirst:/usr/bin/tdm toggle|' \
+  -e 's|^.*tty3::.*|tty3::askfirst:/usr/bin/tdm on|' \
+  -e 's|^.*tty4::.*|tty4::askfirst:/usr/bin/tdm off|' \
+  -e 's|^.*tty5::.*|tty5::askfirst:/usr/bin/tdm poweroff|' \
+  -e 's|^.*tty6::.*|tty6::askfirst:/usr/bin/tdm cycle|' /etc/inittab
+killall -HUP init
+
+# 2. Quiet, cool machine: lowest CPU frequency, no X, help text on the console.
+for g in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
+    [ -w "$g" ] && echo powersave > "$g"
+done
+sed -i 's/^waitforX.*/waitforX || exit/' /home/tc/.xsession 2>/dev/null
+grep -q 'tdm help' /home/tc/.profile 2>/dev/null || echo '/usr/bin/tdm help' >> /home/tc/.profile
+
+# 3. tdm-guard switches the panel to the external input once and re-applies the
+#    proven off/on recovery if the link drops (log: /tmp/tdm-guard.log). If no
+#    source is cabled the screen goes dark - Ctrl+Alt+F4 + Enter brings it back.
+if command -v setsid >/dev/null 2>&1; then
+    setsid /usr/bin/tdm-guard > /dev/null 2>&1 &
+else
+    /usr/bin/tdm-guard > /dev/null 2>&1 &
+fi

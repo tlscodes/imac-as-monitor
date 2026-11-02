@@ -1,0 +1,11 @@
+cache/
+dist/
+build/
+smc_util/
+.test/
+.ledger/
+.backups/
+.rail/
+.handoff/
+*.dmg
+.DS_Store
