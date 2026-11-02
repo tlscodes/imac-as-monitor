@@ -68,9 +68,19 @@ Hotkeys (press Ctrl+Alt+F<n>, then Enter):
 
 CLI on F1: `tdm on|off|toggle|status|bright 0-100|poweroff`.
 
+## Mac mini side (optional, no sudo)
+
+`tools/mini/install-display-off.sh [user@host]` installs over ssh:
+
+* **Screen Off.app** (`~/Applications`, pinned to the Dock) - one click puts the mini's displays to sleep; the iMac panel goes dark; any mouse/keyboard event brings the picture back in ~2 s. Nothing reboots, TDM is untouched.
+* **LaunchAgent `com.imac-tdm.keep-display-awake`** - holds `caffeinate -d -i -s` so the mini never *idle*-sleeps its display. Without it, display sleep on the mini (default 10 min) drops the DisplayPort link and the iMac shows black or a stale frame.
+* `~/od-sender/display-off.sh` - the same thing from a terminal / ssh.
+
+Permanent alternative to the agent (needs a password on the mini): `sudo pmset -a displaysleep 0 sleep 0 disksleep 0`.
+
 ## Troubleshooting
 
-* **Black screen after boot** – the source Mac is not sending a signal. Ctrl+Alt+F4, Enter brings the console back.
+* **Black screen after boot** – the source Mac is not sending a signal (most often the Mac mini's display is asleep: wake it, see *Mac mini side*). Ctrl+Alt+F4, Enter brings the console back.
 * **"SMC did not accept the change"** – some boards NAK (`send_byte ... fail: 0x40`). The script retries 4×; if it never takes, that iMac cannot be switched this way (known, unsolved upstream).
 * **Key not found at boot** – label must be exactly `TINYCORE`, partition table GPT, FAT32.
 * **Verbose boot** – hold a key during GRUB's 0 s timeout is impossible; instead edit `boot/grub/grub.cfg` on the key and set `timeout=5`, pick the second entry.

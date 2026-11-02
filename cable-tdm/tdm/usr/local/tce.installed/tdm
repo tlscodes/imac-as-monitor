@@ -116,8 +116,9 @@ case "$MODE" in
             # the panel stays black; the owner's proven fix is off, 3 s, on (F4/F3).
             # Do that kick once, automatically, before handing over to the guard.
             # Boot 21:31 (owner): the picture from the first on appears about 8-10 s after MVHR=1;
-            # kicking at 1 s lands before any picture, so the owner never sees a blink.
-            sleep 1
+            # Boot 23:10 (owner): kicking at 1 s leaves the panel BLACK for good; the kick only
+            # works after the first on has finished its ~10 s bring-up. 10 s is the proven value.
+            sleep 10
             log "boot kick: off"; TDM_GUARD=1 /usr/bin/tdm off >> "$LOG" 2>&1
             sleep 3
             log "boot kick: on";  TDM_GUARD=1 /usr/bin/tdm on  >> "$LOG" 2>&1
