@@ -27,9 +27,17 @@ the SMC keys `MVHR`/`MVMR` (mechanism from [floe/smc_util](https://github.com/fl
 - Build and write: `cd cable-tdm && ./build.sh --usb /dev/diskN` (prebuilt EFI loader and `SmcDumpKey`
   are included, so Docker is only needed if you change `grub.cfg`'s embedded copy).
 
-Known limits (honest): a black picture while the SMC still reports "external" is not auto-detected;
-audio over the DisplayPort link is not handled by the Linux key yet (the Mac sees a "DisplayPort"
-output, the iMac side has no audio driver loaded).
+- Mac mini reboot (or a macOS auto-update at night) leaves the iMac black: that is fixed automatically
+  when one straight Ethernet cable joins the mini and the iMac. The key's `tdm-kickd` watches the cable
+  carrier and kicks the panel (off, 3 s, on) at +15 s and +45 s after the mini comes back, before any
+  FileVault password is typed; the mini-side `tdm-link-watch` agent covers link drops after login.
+  Tested: remote `osascript restart` of the mini, picture back in under a minute, hands off.
+  Setup and the why: `cable-tdm/README.md`, sections *Mac mini side* and *Mac mini reboot*.
+
+Known limits (honest): a black picture while the SMC still reports "external" is only auto-detected
+through the Ethernet cable (carrier drop on the key, `No Link` on the mini); without the cable use the
+hotkeys. The 2–3 s blink of each kick is the repair itself. Audio over the DisplayPort link is not
+handled by the Linux key yet (the Mac sees a "DisplayPort" output, the iMac side has no audio driver loaded).
 
 ## 2. Network display — `network-display/`
 
@@ -40,16 +48,7 @@ The two machines are joined by ONE Ethernet cable (10.10.10.1 ↔ 10.10.10.2, mD
 - Receiver: pinned software H.264 decode, 2048×1152, auto-respawn; knobs in `od-kiosk.conf` on the
   key's FAT partition. Mac side: `macmini/setup-sender.sh` installs the sender and a launch agent
   that reconnects after sleep.
-- Persian setup notes: `network-display/macmini/OpenDisplay_Mac_mini_setup_FA.txt`.
 - Build: `cd network-display && ./build.sh` (see its README for the remaster and key-sync steps).
-
-## فارسی
-
-دو روش مستقل و آزمایش‌شده برای اینکه آی‌مک قدیمی مانیتور مک مینی یا هر دستگاه دیگری شود؛ هر دو از یک فلش USB بوت می‌شوند و به دیسک آی‌مک کاری ندارند.
-
-- روش کابلی در پوشهٔ cable-tdm: کابل USB-C به Mini DisplayPort، تصویر بومی ۲۵۶۰×۱۴۴۰ در ۶۰ هرتز و بدون تأخیر؛ برای آی‌مک‌های ۲۰۰۹ و ۲۰۱۰.
-- روش شبکه‌ای در پوشهٔ network-display: فقط یک کابل شبکه بین دو دستگاه، تصویر استریم‌شده؛ برای هر آی‌مکی که از فلش بوت شود.
-- راهنمای فارسی نصب سمت مک مینی در فایل OpenDisplay_Mac_mini_setup_FA.txt داخل پوشهٔ macmini.
 
 ## License
 

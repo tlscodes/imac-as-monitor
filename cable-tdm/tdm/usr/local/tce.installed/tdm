@@ -127,7 +127,12 @@ case "$MODE" in
             /usr/bin/tdm-flush
             /usr/bin/tdm-guard > /dev/null 2>&1 &
             log "tdm-guard started pid=$!"
-        fi ;;
+        fi
+        # Link repair from the Mac mini side (tdm-kickd): eth0 10.10.10.2, TCP 9100,
+        # "KICK" = off/3s/on. Needed after a mini reboot: the mini sees "No Link",
+        # MVHR is still 1 so the guard cannot know, only the mini can ask for the kick.
+        /usr/bin/tdm-kickd > /dev/null 2>&1 &
+        log "tdm-kickd started pid=$!" ;;
     *)
         log "unknown mode '$MODE', nothing switched" ;;
 esac

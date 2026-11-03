@@ -29,9 +29,23 @@ if osascript -e 'with timeout of 10 seconds' \
      -e "tell application \"Finder\" to duplicate (POSIX file \"$APP\" as alias) to desktop with replacing" \
      -e 'end timeout' >/dev/null 2>&1; then echo "DESKTOP ok"; else echo "DESKTOP skipped (TCC: allow sshd->Finder on the console, or drag the Dock icon)"; fi
 
+# Link watcher: asks the iMac key (tdm-kickd, 10.10.10.2:9100 over the spare Ethernet cable)
+# for TDM off/on whenever ioreg shows "No Link" — the post-reboot black screen fix.
+WLABEL=com.imac-tdm.link-watch
+WPL="$HOME/Library/LaunchAgents/$WLABEL.plist"
+chmod 755 ~/od-sender/tdm-link-watch.sh
+sed "s|__HOME__|$HOME|g" ~/od-sender/com.imac-tdm.link-watch.plist > "$WPL"
+launchctl bootout "gui/$UIDN/$WLABEL" 2>/dev/null || true
+launchctl bootstrap "gui/$UIDN" "$WPL"
+# the direct cable gets a fixed address once (no DHCP on a two-node cable; mask /24, see memory)
+networksetup -getinfo Ethernet 2>/dev/null | grep -q '^IP address: 10.10.10.1$' \
+  || networksetup -setmanual Ethernet 10.10.10.1 255.255.255.0 2>&1 | sed 's/^/networksetup: /'
+
 echo "--- verify"
 ls -d "$APP"
 launchctl list | grep "$LABEL"
+launchctl list | grep "$WLABEL"
+sleep 2; tail -n 2 ~/Library/Logs/tdm-link-watch.log
 pmset -g assertions | grep -E 'PreventUserIdleDisplaySleep.*caffeinate' | head -1
 pmset -g | grep -E '^ *(displaysleep|sleep) '
 echo INSTALLED

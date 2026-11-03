@@ -5,15 +5,6 @@ Wayland kiosk (cage). The Mac mini runs the OpenDisplay macOS sender (VideoToolb
 treats the iMac as a normal external display. Nothing is bought, nothing needs internet at the iMac:
 the two machines are joined by ONE Ethernet cable (10.10.10.1 ↔ 10.10.10.2, mDNS discovery on the link).
 
-## خلاصه‌ی فارسی
-- کلید USB را به آی‌مک بزنید، با Option روشن کنید، EFI Boot را انتخاب کنید؛ بعد از ۱ تا ۲ دقیقه صفحه‌ی گیرنده بالا می‌آید.
-- کابل شبکه را مستقیم بین آی‌مک و مک‌مینی وصل کنید.
-- روی مک‌مینی اسکریپت زیر را اجرا کنید؛ آی‌مک در منوی OpenDisplay با نام imac27 دیده می‌شود.
-
-```
-imac-display/macmini/setup-sender.sh
-```
-
 ## Files
 | path | role |
 |---|---|

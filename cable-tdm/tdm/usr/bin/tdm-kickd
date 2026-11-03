@@ -1,0 +1,110 @@
+#!/bin/sh
+# tdm-kickd: lets the Mac mini repair the DisplayPort link from ITS side.
+#
+# Hardware truth (2026-11-03): after a Mac mini reboot the mini sees the iMac as
+# "No Link" (phantom 1920x1080, ProductID 0) and nothing on the mini side fixes it;
+# tdm-guard cannot see it either (MVHR stays 1). The only repair is the proven
+# TDM off, 3 s, on on the iMac. The mini CAN see the link (ioreg LinkRateDescription),
+# so it runs tdm-link-watch (tools/mini) and asks us over the spare Ethernet cable.
+#
+# Wire: iMac eth0 10.10.10.2/24  <--- straight cable --->  Mac mini en0 10.10.10.1/24
+# Protocol: one TCP connection to port 9100, one line, client closes:
+#   KICK     -> off, 3 s, on, 10 s   (ignored while /tmp/tdm.manual_off exists = Ctrl+Alt+F4,
+#               and at most once per MIN_GAP s)
+#   STATUS   -> only logged (tdm status + raw SMC keys)
+# Log: /tmp/tdm-log/kick.log, mirrored to <key>/tce/log/kick.log by tdm-flush.
+# Started by /usr/local/tce.installed/tdm after tdm-guard; busybox nc serves one
+# connection per call, so the loop re-listens after every request.
+IF=${TDM_KICK_IF:-eth0}
+IP=${TDM_KICK_IP:-10.10.10.2}
+PORT=${TDM_KICK_PORT:-9100}
+MIN_GAP=${TDM_KICK_GAP:-20}
+LOGDIR=/tmp/tdm-log; mkdir -p "$LOGDIR"
+LOG="$LOGDIR/kick.log"
+PID=/tmp/tdm-kickd.pid
+
+up()  { cut -d. -f1 /proc/uptime; }
+log() { echo "$(date '+%F %T') up=$(up)s $*" >> "$LOG"; echo "tdm-kickd: $*" > /dev/kmsg 2>/dev/null; /usr/bin/tdm-flush; }
+
+if [ -s "$PID" ] && kill -0 "$(cat "$PID")" 2>/dev/null; then
+    log "already running as pid $(cat "$PID"), exit"; exit 0
+fi
+echo $$ > "$PID"
+log "start pid=$$ if=$IF ip=$IP port=$PORT gap=${MIN_GAP}s"
+
+# --- NIC: tg3 (iMac 2010 Broadcom) is in corepure64; udev loads it, we only wait --------
+n=0
+while [ ! -d "/sys/class/net/$IF" ] && [ $n -lt 30 ]; do
+    /sbin/modprobe tg3 2>/dev/null; sleep 1; n=$((n + 1))
+done
+if [ ! -d "/sys/class/net/$IF" ]; then
+    log "ERROR no $IF after ${n}s: $(ls /sys/class/net | tr '\n' ' ')"; exit 1
+fi
+if ifconfig "$IF" "$IP" netmask 255.255.255.0 up 2>>"$LOG"; then
+    log "$IF up $IP/24 carrier=$(cat /sys/class/net/$IF/carrier 2>/dev/null)"
+else
+    log "ERROR ifconfig $IF failed"; exit 1
+fi
+
+kick() {
+    touch /tmp/tdm-guard.pause          # the guard must not act while we switch
+    log "KICK: off"; TDM_GUARD=1 /usr/bin/tdm off >> "$LOG" 2>&1
+    sleep 3
+    log "KICK: on";  TDM_GUARD=1 /usr/bin/tdm on  >> "$LOG" 2>&1
+    sleep 10
+    rm -f /tmp/tdm-guard.pause
+    log "KICK done status=$(/usr/bin/tdm status) $(/usr/bin/tdm-guard measure 2>&1)"
+}
+
+# Shared gate for every kick source (mini request, mini-watch): manual off wins, then MIN_GAP.
+# The timestamp lives in a file because mini-watch runs in a background subshell.
+LAST=/tmp/tdm-kickd.last
+last_kick() { cat "$LAST" 2>/dev/null || echo 0; }
+try_kick() {   # $1 = who asked
+    now=$(up); ago=$((now - $(last_kick)))
+    if [ -e /tmp/tdm.manual_off ]; then
+        log "KICK ignored ($1): manual off (Ctrl+Alt+F4) is active"
+    elif [ "$ago" -lt "$MIN_GAP" ]; then
+        log "KICK ignored ($1): last kick ${ago}s ago (< ${MIN_GAP}s)"
+    else
+        echo "$now" > "$LAST"
+        log "KICK accepted ($1) $(/usr/bin/tdm-guard measure 2>&1)"
+        kick
+    fi
+}
+
+# --- mini-watch (owner law 2026-11-03 14:02): FileVault keeps every mini agent asleep until
+# the password is typed, so the mini cannot ask for the kick after its own reboot; the key
+# must notice the reboot itself. Signal: eth0 carrier drops while the mini restarts and
+# returns while it shows the pre-boot screen. carrier down >= 3 s, then up -> kick at +15 s
+# and again at +45 s (the mini re-trains the display late in boot; each kick is a 2 s blip).
+# A cable replug looks the same and costs the same two blips, nothing worse.
+mini_watch() {
+    prev=$(cat "/sys/class/net/$IF/carrier" 2>/dev/null); down_at=0
+    log "mini-watch start carrier=$prev"
+    while :; do
+        sleep 2
+        c=$(cat "/sys/class/net/$IF/carrier" 2>/dev/null)
+        [ "$c" = "$prev" ] && continue
+        log "mini-watch: carrier $prev -> $c"
+        if [ "$c" = "0" ]; then
+            down_at=$(up)
+        elif [ "$c" = "1" ] && [ "$down_at" -gt 0 ] && [ $(( $(up) - down_at )) -ge 3 ]; then
+            down_at=0
+            ( sleep 15; try_kick "mini-watch +15s"; sleep 30; try_kick "mini-watch +45s" ) &
+        fi
+        prev=$c
+    done
+}
+mini_watch &
+
+while :; do
+    # one connection: the client (nc -N) sends a line and closes, nc exits, we read it all
+    req=$(nc -l -p "$PORT" 2>/dev/null | head -c 64 | tr -cd 'A-Za-z0-9 ')
+    case "$req" in
+        KICK*)   try_kick "from the Mac mini" ;;
+        STATUS*) log "STATUS: tdm=$(/usr/bin/tdm status) $(/usr/bin/tdm-guard measure 2>&1)" ;;
+        "")      sleep 1 ;;      # nc failed or empty request: never spin
+        *)       log "ignored request [$req]" ;;
+    esac
+done

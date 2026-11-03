@@ -12,5 +12,10 @@ set -eu
 HOST="${1:-user@mac-mini.local}"
 SSH=(ssh -o ControlMaster=auto -o ControlPath="$HOME/.ssh/cm/%r@%h:%p" -o ControlPersist=30m -o ConnectTimeout=10 "$HOST")
 HERE="$(cd "$(dirname "$0")" && pwd)"
-scp -o ControlPath="$HOME/.ssh/cm/%r@%h:%p" "$HERE/display-off.sh" "$HERE/keep-display-awake.plist" "$HERE/install-on-mini.sh" "$HOST:od-sender/"
+#   ~/Library/LaunchAgents/com.imac-tdm.link-watch.plist  (tdm-link-watch.sh)
+#       polls the DisplayPort link every 10 s; "No Link" -> asks the iMac key (tdm-kickd on the
+#       spare Ethernet cable, 10.10.10.2:9100) for TDM off/on -> picture is back without touching the iMac.
+scp -o ControlPath="$HOME/.ssh/cm/%r@%h:%p" "$HERE/display-off.sh" "$HERE/keep-display-awake.plist" \
+    "$HERE/tdm-link-watch.sh" "$HERE/com.imac-tdm.link-watch.plist" "$HERE/no-autoupdate.sh" \
+    "$HERE/install-on-mini.sh" "$HOST:od-sender/"
 "${SSH[@]}" 'bash ~/od-sender/install-on-mini.sh'
